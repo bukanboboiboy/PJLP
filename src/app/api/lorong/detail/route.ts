@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getToken, clearSession } from '@/lib/auth';
+import { API_ENDPOINTS } from '@/lib/api-config';
 
 export async function GET(request: NextRequest) {
   const token = await getToken();
@@ -12,7 +13,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'lorong_ids parameter required' }, { status: 400 });
   }
 
-  const ids = lorongIds.split(',').map(id => id.trim()).filter(Boolean);
+  const ids = lorongIds.split(',').map((id) => id.trim()).filter(Boolean);
 
   try {
     // Fetch semua device check secara paralel (batch)
@@ -20,11 +21,11 @@ export async function GET(request: NextRequest) {
       ids.map(async (lorongId) => {
         try {
           const apiResponse = await fetch(
-            `https://cctv-lorong.gwehjj.com/api/monitoring-pengecekan?lorong_id=${lorongId}`,
+            API_ENDPOINTS.monitoringPengecekan(lorongId),
             {
               method: 'GET',
               headers: {
-                'Authorization': `Bearer ${token}`,
+                Authorization: `Bearer ${token}`,
                 'Content-Type': 'application/json',
               },
             }
@@ -35,10 +36,13 @@ export async function GET(request: NextRequest) {
           }
 
           const data = await apiResponse.json();
-          return { lorong_id: parseInt(lorongId), data: Array.isArray(data) ? data : [] };
+          return {
+            lorong_id: parseInt(lorongId, 10),
+            data: Array.isArray(data) ? data : [],
+          };
         } catch (err) {
           if (err instanceof Error && err.message === 'UNAUTHORIZED') throw err;
-          return { lorong_id: parseInt(lorongId), data: [] };
+          return { lorong_id: parseInt(lorongId, 10), data: [] };
         }
       })
     );

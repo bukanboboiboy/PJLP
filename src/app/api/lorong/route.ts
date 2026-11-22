@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getToken, clearSession } from '@/lib/auth';
+import { API_ENDPOINTS } from '@/lib/api-config';
 
 export async function GET(request: NextRequest) {
   const token = await getToken();
@@ -8,14 +9,16 @@ export async function GET(request: NextRequest) {
   }
 
   const sessionId = request.nextUrl.searchParams.get('session_id') || '70';
+  const limitParam = request.nextUrl.searchParams.get('limit') || '1000';
+  const limit = parseInt(limitParam, 10) || 1000;
 
   try {
     const apiResponse = await fetch(
-      `https://cctv-lorong.gwehjj.com/api/monitoring-lorong?monitoring_session_id=${sessionId}`,
+      API_ENDPOINTS.monitoringSession(sessionId, limit),
       {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
       }
@@ -31,7 +34,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Lorong fetch error:', error);
     return NextResponse.json(
-      { error: 'Gagal mengambil data lorong' },
+      { error: 'Gagal mengambil data lorong dari server' },
       { status: 500 }
     );
   }

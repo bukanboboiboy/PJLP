@@ -1,15 +1,14 @@
+import { API_BASE_URL } from './api-config';
+
 /**
  * Format nomor telepon Indonesia ke format WhatsApp (62...)
  * Mengubah awalan 08... menjadi 628..., membersihkan spasi dan tanda strip
  */
 export function formatPhoneToWA(phone: string): string {
-  // Bersihkan spasi, strip, titik, kurung
   let cleaned = phone.replace(/[\s\-\.\(\)]/g, '');
-  // Ubah awalan 0 menjadi 62
   if (cleaned.startsWith('0')) {
     cleaned = '62' + cleaned.substring(1);
   }
-  // Jika belum ada awalan 62
   if (!cleaned.startsWith('62')) {
     cleaned = '62' + cleaned;
   }
@@ -36,7 +35,7 @@ export function getMapsUrl(lat: string, lng: string): string {
 export function getFullImageUrl(path: string | null): string | null {
   if (!path) return null;
   if (path.startsWith('http')) return path;
-  return `https://cctv-lorong.gwehjj.com${path}`;
+  return `${API_BASE_URL}${path}`;
 }
 
 /**
