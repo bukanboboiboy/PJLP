@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { setSession } from '@/lib/auth';
+import { applySessionCookie, clearSessionCookie } from '@/lib/auth';
 import { API_ENDPOINTS } from '@/lib/api-config';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,14 +16,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Proxy ke API eksternal: /api/auth/login
     const apiResponse = await fetch(API_ENDPOINTS.login, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      },
       body: JSON.stringify({
         numberid: String(numberid).trim(),
         password: String(password),
       }),
+      cache: 'no-store',
     });
 
     let data: Record<string, unknown> = {};
@@ -41,10 +46,12 @@ export async function POST(request: NextRequest) {
         (typeof data.error === 'string' && data.error) ||
         (typeof data.message === 'string' && data.message) ||
         'Login gagal. Periksa kembali Number ID dan Password.';
-      return NextResponse.json(
+      const errRes = NextResponse.json(
         { error: errorMessage },
         { status: apiResponse.status }
       );
+      clearSessionCookie(errRes);
+      return errRes;
     }
 
     if (!data.token || !data.user) {
@@ -54,8 +61,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Simpan token dan user di HTTP-only cookie selama 24 jam
-    await setSession({
+    const response = NextResponse.json(
+      { success: true, user: data.user },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+        },
+      }
+    );
+
+    // Bersihkan cookie lama dengan path: '/' lalu timpa dengan sesi baru
+    clearSessionCookie(response);
+    applySessionCookie(response, {
       token: data.token as string,
       user: data.user as {
         id: number;
@@ -66,7 +83,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json({ success: true, user: data.user });
+    return response;
   } catch (error) {
     console.error('Login proxy error:', error);
     return NextResponse.json(

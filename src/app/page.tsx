@@ -9,6 +9,18 @@ import { LorongTable } from '@/components/LorongTable';
 import { LorongCardGrid } from '@/components/LorongCardGrid';
 import { LightboxModal } from '@/components/LightboxModal';
 
+type LorongItem = Lorong & {
+  satgas_nama?: string;
+  satgas_phone?: string;
+  user_id?: number | string;
+  satgas_user_id?: number | string;
+};
+
+const NO_STORE_INIT: RequestInit = {
+  cache: 'no-store',
+  headers: { 'Cache-Control': 'no-store' },
+};
+
 export default function DashboardPage() {
   const router = useRouter();
 
@@ -24,56 +36,114 @@ export default function DashboardPage() {
   const [filterKecamatan, setFilterKecamatan] = useState('');
   const [filterKelurahan, setFilterKelurahan] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterSatgas, setFilterSatgas] = useState('');
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [currentPage, setCurrentPage] = useState(1);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [lightboxCaption, setLightboxCaption] = useState<string>('');
   const pageSize = 15;
 
+  const resetDashboardState = useCallback(() => {
+    setUser(null);
+    setLorongList([]);
+    setAvailableSessions([]);
+    setApiError(null);
+    setSearch('');
+    setFilterKecamatan('');
+    setFilterKelurahan('');
+    setFilterStatus('');
+    setFilterSatgas('');
+    setCurrentPage(1);
+    setLightboxImage(null);
+    setLightboxCaption('');
+    if (typeof window !== 'undefined') {
+      localStorage.clear();
+      sessionStorage.clear();
+    }
+  }, []);
+
   // Fetch user info & available sessions
   useEffect(() => {
-    fetch('/api/auth/me')
+    let active = true;
+
+    fetch('/api/auth/me', NO_STORE_INIT)
       .then((res) => {
         if (res.status === 401) {
-          router.push('/login');
+          if (active) {
+            resetDashboardState();
+            router.replace('/login');
+            router.refresh();
+          }
           return null;
         }
         return res.json();
       })
       .then((data) => {
-        if (data?.user) setUser(data.user);
+        if (!active || !data?.user) return;
+        setUser((prev) => {
+          if (prev?.numberid && prev.numberid !== data.user.numberid) {
+            setLorongList([]);
+            setAvailableSessions([]);
+            setFilterSatgas('');
+          }
+          return data.user;
+        });
       })
-      .catch(() => router.push('/login'));
+      .catch(() => {
+        if (active) {
+          resetDashboardState();
+          router.replace('/login');
+          router.refresh();
+        }
+      });
 
-    fetch('/api/sessions')
+    fetch('/api/sessions', NO_STORE_INIT)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
+        if (!active) return;
         const list = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+        setAvailableSessions(list);
         if (list.length > 0) {
-          setAvailableSessions(list);
+          const exists = list.some((s: { id: number | string }) => String(s.id) === String(sessionId));
+          if (!exists) {
+            const firstId = String(list[0].id);
+            setSessionId(firstId);
+            setSessionInput(firstId);
+          }
         }
       })
-      .catch(() => {});
-  }, [router]);
+      .catch(() => { });
+
+    return () => {
+      active = false;
+    };
+  }, [router, resetDashboardState]);
 
   // Fetch lorong list
   const fetchLorong = useCallback(async () => {
     setLoading(true);
     setApiError(null);
+    setLorongList([]);
+    setFilterSatgas('');
     try {
-      const res = await fetch(`/api/lorong?session_id=${sessionId}`);
+      const res = await fetch(
+        `/api/lorong?session_id=${encodeURIComponent(sessionId)}&_t=${Date.now()}`,
+        NO_STORE_INIT
+      );
       if (res.status === 401) {
-        router.push('/login');
+        resetDashboardState();
+        router.replace('/login');
+        router.refresh();
         return;
       }
       const json = await res.json();
-      const rawList: Lorong[] = Array.isArray(json)
+      const rawList: LorongItem[] = Array.isArray(json)
         ? json
         : Array.isArray(json?.data)
-        ? json.data
-        : [];
+          ? json.data
+          : [];
 
-      const list: LordongWithDevice[] = rawList.map((item: Lorong) => ({
+      const list: LordongWithDevice[] = rawList.map((item: LorongItem) => ({
         ...item,
         deviceCheck: undefined,
         deviceLoading: false,
@@ -86,7 +156,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [sessionId, router]);
+  }, [sessionId, user?.numberid, router, resetDashboardState]);
 
   useEffect(() => {
     fetchLorong();
@@ -101,7 +171,9 @@ export default function DashboardPage() {
         (item) =>
           (item.lorong_nama && item.lorong_nama.toLowerCase().includes(q)) ||
           (item.lorong_alamat && item.lorong_alamat.toLowerCase().includes(q)) ||
-          (item.lorong_pic && item.lorong_pic.toLowerCase().includes(q))
+          (item.lorong_pic && item.lorong_pic.toLowerCase().includes(q)) ||
+          ((item as LorongItem).satgas_nama &&
+            (item as LorongItem).satgas_nama!.toLowerCase().includes(q))
       );
     }
     if (filterKecamatan) {
@@ -113,8 +185,13 @@ export default function DashboardPage() {
     if (filterStatus) {
       result = result.filter((item) => item.status === filterStatus);
     }
+    if (filterSatgas) {
+      result = result.filter(
+        (item) => (item as LorongItem).satgas_nama === filterSatgas
+      );
+    }
     return result;
-  }, [lorongList, search, filterKecamatan, filterKelurahan, filterStatus]);
+  }, [lorongList, search, filterKecamatan, filterKelurahan, filterStatus, filterSatgas]);
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -124,32 +201,32 @@ export default function DashboardPage() {
   }, [filtered, currentPage]);
 
   // Batch Fetch device details untuk halaman aktif saja
+  const activeBatchIds = useMemo(
+    () =>
+      paginatedItems
+        .filter((item) => item.deviceCheck === undefined && !item.deviceLoading)
+        .map((item) => item.lorong_id),
+    [paginatedItems]
+  );
+
   useEffect(() => {
-    if (paginatedItems.length === 0) return;
+    if (activeBatchIds.length === 0) return;
 
-    // Cari lorong yang belum punya device check data dan belum loading
-    const needFetch = paginatedItems.filter(
-      (item) => item.deviceCheck === undefined && !item.deviceLoading
-    );
-
-    if (needFetch.length === 0) return;
-
-    // Tandai sebagai loading
+    const batchKey = activeBatchIds.join(',');
     setLorongList((prev) =>
-      prev.map((item) => {
-        if (needFetch.some((n) => n.lorong_id === item.lorong_id)) {
-          return { ...item, deviceLoading: true };
-        }
-        return item;
-      })
+      prev.map((item) =>
+        activeBatchIds.includes(item.lorong_id)
+          ? { ...item, deviceLoading: true }
+          : item
+      )
     );
 
-    // Batch fetch device details
-    const lorongIds = needFetch.map((item) => item.lorong_id).join(',');
-    fetch(`/api/lorong/detail?lorong_ids=${lorongIds}`)
+    fetch(`/api/lorong/detail?lorong_ids=${batchKey}&_t=${Date.now()}`, NO_STORE_INIT)
       .then((res) => {
         if (res.status === 401) {
-          router.push('/login');
+          resetDashboardState();
+          router.replace('/login');
+          router.refresh();
           return null;
         }
         return res.json();
@@ -180,15 +257,14 @@ export default function DashboardPage() {
       .catch((err) => {
         console.error('Device fetch error:', err);
         setLorongList((prev) =>
-          prev.map((item) => {
-            if (needFetch.some((n) => n.lorong_id === item.lorong_id)) {
-              return { ...item, deviceCheck: null, deviceLoading: false };
-            }
-            return item;
-          })
+          prev.map((item) =>
+            activeBatchIds.includes(item.lorong_id)
+              ? { ...item, deviceCheck: null, deviceLoading: false }
+              : item
+          )
         );
       });
-  }, [paginatedItems, sessionId, router]);
+  }, [activeBatchIds, sessionId, user?.numberid, router, resetDashboardState]);
 
   // Dropdown options
   const kecamatanOptions = useMemo(
@@ -204,15 +280,26 @@ export default function DashboardPage() {
     () => [...new Set(lorongList.map((item) => item.status).filter(Boolean))].sort(),
     [lorongList]
   );
+  const satgasOptions = useMemo(
+    () =>
+      [
+        ...new Set(
+          lorongList
+            .map((item) => (item as LorongItem).satgas_nama?.trim())
+            .filter((v): v is string => Boolean(v))
+        ),
+      ].sort((a, b) => a.localeCompare(b, 'id')),
+    [lorongList]
+  );
 
   // Summary
   const summary = useMemo(
     () => ({
-      total: lorongList.length,
-      selesai: lorongList.filter((i) => i.status === 'Selesai').length,
-      belumSelesai: lorongList.filter((i) => i.status !== 'Selesai').length,
+      total: filtered.length,
+      selesai: filtered.filter((i) => i.status === 'Selesai').length,
+      belumSelesai: filtered.filter((i) => i.status !== 'Selesai').length,
     }),
-    [lorongList]
+    [filtered]
   );
 
   // Handlers
@@ -234,9 +321,17 @@ export default function DashboardPage() {
   };
 
   const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/login');
-    router.refresh();
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-store' },
+      });
+    } finally {
+      resetDashboardState();
+      router.replace('/login');
+      router.refresh();
+    }
   };
 
   return (
@@ -348,7 +443,8 @@ export default function DashboardPage() {
                   <div className="text-xs font-bold text-slate-800 leading-tight">
                     {user?.nama || 'Pengguna'}
                   </div>
-                  <div className="text-[10px] font-semibold text-slate-400 capitalize">
+                  <div className="text-[10px] font-semibold text-slate-400">
+                    {user?.numberid ? `ID ${user.numberid}` : 'Petugas'} &bull;{' '}
                     {user?.role?.replace('_', ' ') || 'Petugas'}
                   </div>
                 </div>
@@ -384,6 +480,43 @@ export default function DashboardPage() {
 
       {/* Main Content Body */}
       <main className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        {/* Session & Active Account Info */}
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-white border border-slate-200/80 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-slate-600">
+            <span className="font-bold text-slate-800">
+              Akun Aktif: {user?.nama ?? 'Memuat...'} ({user?.numberid ?? '-'})
+            </span>
+            <span className="text-slate-300">&bull;</span>
+            <span>
+              Total data Sesi {sessionId}: <strong>{lorongList.length}</strong> lorong
+            </span>
+          </div>
+
+          {satgasOptions.length > 0 && (
+            <div className="flex items-center gap-2">
+              <label htmlFor="filter-satgas" className="text-[11px] font-bold text-slate-500">
+                Satgas:
+              </label>
+              <select
+                id="filter-satgas"
+                value={filterSatgas}
+                onChange={(e) => {
+                  setFilterSatgas(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="px-2.5 py-1 text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              >
+                <option value="">Semua Satgas ({satgasOptions.length})</option>
+                {satgasOptions.map((nama) => (
+                  <option key={nama} value={nama}>
+                    {nama}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
         {/* Error Alert */}
         {apiError && (
           <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center justify-between">

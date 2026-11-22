@@ -15,9 +15,18 @@ export default function LoginPage() {
     setError('');
 
     try {
+      if (typeof window !== 'undefined') {
+        localStorage.clear();
+        sessionStorage.clear();
+      }
+
       const res = await fetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        },
+        cache: 'no-store',
         body: JSON.stringify({
           numberid: numberid.trim(),
           password,
@@ -32,8 +41,8 @@ export default function LoginPage() {
         return;
       }
 
-      // Hard redirect ke root agar browser langsung memuat dashboard dengan session cookie aktif
-      window.location.href = '/';
+      // Hard redirect ke root agar browser langsung memuat dashboard dengan session cookie baru
+      window.location.replace('/');
     } catch {
       setError('Gagal menghubungi server proxy. Pastikan jaringan internet Anda aktif.');
       setLoading(false);
@@ -120,7 +129,7 @@ export default function LoginPage() {
                   autoComplete="username"
                   value={numberid}
                   onChange={(e) => setNumberid(e.target.value)}
-                  placeholder="Contoh: 00060"
+                  placeholder="Contoh: 00031"
                   required
                   className="w-full pl-11 pr-4 py-3.5 bg-slate-900/60 border border-slate-700/80 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-transparent transition-all shadow-inner hover:border-slate-600"
                 />

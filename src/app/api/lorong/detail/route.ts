@@ -1,22 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getToken, clearSession } from '@/lib/auth';
+import { getToken, clearSession, clearSessionCookie } from '@/lib/auth';
 import { API_ENDPOINTS } from '@/lib/api-config';
+
+export const dynamic = 'force-dynamic';
+
+const NO_STORE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate',
+};
 
 export async function GET(request: NextRequest) {
   const token = await getToken();
   if (!token) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: NO_STORE_HEADERS });
   }
 
   const lorongIds = request.nextUrl.searchParams.get('lorong_ids');
   if (!lorongIds) {
-    return NextResponse.json({ error: 'lorong_ids parameter required' }, { status: 400 });
+    return NextResponse.json({ error: 'lorong_ids parameter required' }, { status: 400, headers: NO_STORE_HEADERS });
   }
 
   const ids = lorongIds.split(',').map((id) => id.trim()).filter(Boolean);
 
   try {
-    // Fetch semua device check secara paralel (batch)
     const results = await Promise.all(
       ids.map(async (lorongId) => {
         try {
@@ -27,7 +32,9 @@ export async function GET(request: NextRequest) {
               headers: {
                 Authorization: `Bearer ${token}`,
                 'Content-Type': 'application/json',
+                'Cache-Control': 'no-store',
               },
+              cache: 'no-store',
             }
           );
 
@@ -47,16 +54,18 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    return NextResponse.json({ results });
+    return NextResponse.json({ results }, { headers: NO_STORE_HEADERS });
   } catch (error) {
     if (error instanceof Error && error.message === 'UNAUTHORIZED') {
       await clearSession();
-      return NextResponse.json({ error: 'Session expired' }, { status: 401 });
+      const res = NextResponse.json({ error: 'Session expired' }, { status: 401, headers: NO_STORE_HEADERS });
+      clearSessionCookie(res);
+      return res;
     }
     console.error('Device check fetch error:', error);
     return NextResponse.json(
       { error: 'Gagal mengambil data perangkat' },
-      { status: 500 }
+      { status: 500, headers: NO_STORE_HEADERS }
     );
   }
 }
